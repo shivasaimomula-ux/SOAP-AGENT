@@ -22,9 +22,9 @@ DEFAULT_NVIDIA_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
 DEFAULT_GEMINI_LIVE_MODEL = "gemini-3.8-live"
 _ROLE_MODELS = {
     "nvidia": DEFAULT_NVIDIA_MODEL,
-    "gemini_live": DEFAULT_GEMINI_LIVE_MODEL,
-    "google": DEFAULT_GEMINI_LIVE_MODEL,
 }
+# generateContent model for extractor / responder / red-flag. Not the native-audio Live model.
+DEFAULT_GEMINI_TEXT_MODEL = "gemini-3.8-flash"
 
 
 def _find_env_file() -> Path | None:
@@ -60,16 +60,22 @@ class Settings(BaseSettings):
     gemini_live_api_version: str = "v1beta"
     gemini_live_listen_timeout_s: float = 20.0
     gemini_live_speak_timeout_s: float = 30.0
+    # Server VAD fallback. A finished clip also sends audio_stream_end, so this wait is not on the hot path.
+    gemini_live_silence_ms: int = 500
+    # Text roles (extractor, responder, red flag). Override with GEMINI_TEXT_MODEL or LLM_<ROLE>_MODEL.
+    gemini_text_model: str = DEFAULT_GEMINI_TEXT_MODEL
+    gemini_text_thinking_level: str = "low"
 
-    # LLM roles. Defaults follow Gemini Live; LLM_PROVIDER=nvidia restores Nemotron.
+    # LLM roles. gemini_live uses GEMINI_TEXT_MODEL for text; voice uses GEMINI_LIVE_MODEL.
+    # LLM_PROVIDER=nvidia restores Nemotron and does not read the Gemini text model.
     llm_extractor_provider: LLMProvider = "gemini_live"
-    llm_extractor_model: str = DEFAULT_GEMINI_LIVE_MODEL
+    llm_extractor_model: str = DEFAULT_GEMINI_TEXT_MODEL
     llm_extractor_base_url: str | None = None
     llm_responder_provider: LLMProvider = "gemini_live"
-    llm_responder_model: str = DEFAULT_GEMINI_LIVE_MODEL
+    llm_responder_model: str = DEFAULT_GEMINI_TEXT_MODEL
     llm_responder_base_url: str | None = None
     llm_red_flag_provider: LLMProvider = "gemini_live"
-    llm_red_flag_model: str = DEFAULT_GEMINI_LIVE_MODEL
+    llm_red_flag_model: str = DEFAULT_GEMINI_TEXT_MODEL
     llm_red_flag_base_url: str | None = None
     llm_disable_thinking: bool = True
     llm_extractor_timeout_s: float = 20.0
@@ -120,15 +126,11 @@ class Settings(BaseSettings):
             if shared and provider_field not in self.model_fields_set:
                 setattr(self, provider_field, shared)
             provider = getattr(self, provider_field)
-            if model_field not in self.model_fields_set and provider in _ROLE_MODELS:
-                setattr(self, model_field, _ROLE_MODELS[provider])
-        providers = {self.llm_extractor_provider, self.llm_responder_provider, self.llm_red_flag_provider}
-        if providers & {"gemini_live", "google"}:
-            # A Live turn speaks audio and then returns a transcript, so the old NVIDIA budgets are tight.
-            if "responder_timeout_s" not in self.model_fields_set:
-                self.responder_timeout_s = 15.0
-            if "llm_extractor_timeout_s" not in self.model_fields_set:
-                self.llm_extractor_timeout_s = 30.0
+            if model_field not in self.model_fields_set:
+                if provider in ("gemini_live", "google"):
+                    setattr(self, model_field, self.gemini_text_model)
+                elif provider in _ROLE_MODELS:
+                    setattr(self, model_field, _ROLE_MODELS[provider])
         return self
 
     def google_credentials_configured(self) -> bool:
