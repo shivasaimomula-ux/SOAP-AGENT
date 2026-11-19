@@ -65,4 +65,25 @@ def get_llm(settings: Settings, role: Role) -> BaseChatModel:
             temperature=temperature,
             max_output_tokens=max_tokens,
         )
+    if provider == "gemini_live":
+        # Native-audio Live models answer in audio. The chat wrapper reads the output transcript
+        # so the extractor, responder, and red-flag classifier keep their text contracts.
+        if not settings.google_credentials_configured():
+            raise LLMConfigError(
+                "GOOGLE_API_KEY is required for the gemini_live provider "
+                "(or set GOOGLE_GENAI_USE_VERTEXAI with GOOGLE_CLOUD_PROJECT)."
+            )
+        from herbenzo_agent.gemini_live.chat import GeminiLiveChatModel
+
+        return GeminiLiveChatModel(
+            model_name=model,
+            api_key=settings.google_api_key,
+            vertexai=settings.google_genai_use_vertexai,
+            project=settings.google_cloud_project,
+            location=settings.google_cloud_location,
+            api_version=settings.gemini_live_api_version,
+            voice_name=settings.gemini_live_voice,
+            temperature=temperature,
+            max_output_tokens=max_tokens,
+        )
     raise LLMConfigError(f"Provider {provider!r} has no chat model; use the fake components in tests.")

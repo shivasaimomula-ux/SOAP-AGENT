@@ -67,7 +67,7 @@ def prod(**kw) -> Settings:
         internal_api_token="i" * 32,
         admin_api_token="a" * 32,
         chat_bootstrap_token="c" * 32,
-        nvidia_api_key="nvapi-x",
+        google_api_key="g" * 20,
         cors_allow_origins=["https://intake.herbenzo.com"],
         guardrails_enabled=True,
     )
@@ -89,12 +89,17 @@ def test_production_config_accepted():
         ({"cors_allow_origins": ["*"]}, "CORS_ALLOW_ORIGINS"),
         ({"cors_allow_origins": ["http://localhost:4400"]}, "CORS_ALLOW_ORIGINS"),
         ({"guardrails_enabled": False}, "GUARDRAILS_ENABLED"),
-        ({"nvidia_api_key": None}, "NVIDIA_API_KEY"),
+        ({"google_api_key": None}, "GOOGLE_API_KEY"),
     ],
 )
 def test_unsafe_production_config_refuses_to_start(override, expected):
     with pytest.raises(MissingConfigError, match=expected):
         prod(**override).validate_for_startup()
+
+
+def test_prod_nvidia_provider_still_requires_nvidia_key():
+    with pytest.raises(MissingConfigError, match="NVIDIA_API_KEY"):
+        prod(llm_provider="nvidia", nvidia_api_key=None, google_api_key=None).validate_for_startup()
 
 
 def test_dev_only_warns():
@@ -114,7 +119,9 @@ def test_requires_chat_auth_auto_from_env():
 def test_chat_auth_required_override():
     assert Settings(_env_file=None, env="dev", chat_auth_required=True).requires_chat_auth() is True
     assert (
-        Settings(_env_file=None, env="prod", chat_auth_required=False, chat_bootstrap_token="c" * 32).requires_chat_auth()
+        Settings(
+            _env_file=None, env="prod", chat_auth_required=False, chat_bootstrap_token="c" * 32
+        ).requires_chat_auth()
         is False
     )
 
@@ -218,7 +225,7 @@ async def test_ready_detects_retired_model(tmp_path):
     respx.get("https://integrate.api.nvidia.com/v1/models").mock(
         return_value=models_response("some/other-model")
     )
-    report = await (await checker(tmp_path, handoff_enabled=False)).check()
+    report = await (await checker(tmp_path, handoff_enabled=False, llm_provider="nvidia")).check()
     assert report["ready"] is False
     assert report["checks"]["llm_models"]["missing"] == ["nvidia/nemotron-3.5-lightning-30b-a3b"]
 
@@ -229,7 +236,7 @@ async def test_ready_when_everything_is_configured(tmp_path):
         return_value=models_response("nvidia/nemotron-3.5-lightning-30b-a3b")
     )
     respx.get("http://localhost:8000/health").mock(return_value=httpx.Response(200, json={"status": "ok"}))
-    report = await (await checker(tmp_path)).check()
+    report = await (await checker(tmp_path, llm_provider="nvidia")).check()
     assert report["ready"] is True and report["checks"]["recommender"]["ok"] is True
     assert report["mode"] == "pipeline" and report["pipeline_mode"] is True
 
@@ -240,7 +247,7 @@ async def test_unreachable_recommender_blocks_pipeline_readiness(tmp_path):
         return_value=models_response("nvidia/nemotron-3.5-lightning-30b-a3b")
     )
     respx.get("http://localhost:8000/health").mock(side_effect=httpx.ConnectError("down"))
-    report = await (await checker(tmp_path, pipeline_mode=True)).check()
+    report = await (await checker(tmp_path, pipeline_mode=True, llm_provider="nvidia")).check()
     assert report["ready"] is False
     assert report["mode"] == "pipeline"
     assert report["checks"]["recommender"]["ok"] is False
@@ -253,7 +260,7 @@ async def test_unreachable_recommender_does_not_block_intake_only_readiness(tmp_
         return_value=models_response("nvidia/nemotron-3.5-lightning-30b-a3b")
     )
     respx.get("http://localhost:8000/health").mock(side_effect=httpx.ConnectError("down"))
-    report = await (await checker(tmp_path, pipeline_mode=False)).check()
+    report = await (await checker(tmp_path, pipeline_mode=False, llm_provider="nvidia")).check()
     assert report["ready"] is True and report["mode"] == "intake_only"
     assert report["checks"]["recommender"]["ok"] is False
 
@@ -263,7 +270,9 @@ async def test_pipeline_mode_with_handoff_disabled_ignores_recommender(tmp_path)
     respx.get("https://integrate.api.nvidia.com/v1/models").mock(
         return_value=models_response("nvidia/nemotron-3.5-lightning-30b-a3b")
     )
-    report = await (await checker(tmp_path, pipeline_mode=True, handoff_enabled=False)).check()
+    report = await (
+        await checker(tmp_path, pipeline_mode=True, handoff_enabled=False, llm_provider="nvidia")
+    ).check()
     assert report["ready"] is True
     assert report["checks"]["recommender"]["ok"] is True
     assert "handoff disabled" in report["checks"]["recommender"]["detail"]
@@ -272,7 +281,7 @@ async def test_pipeline_mode_with_handoff_disabled_ignores_recommender(tmp_path)
 @respx.mock
 async def test_provider_outage_does_not_block_readiness(tmp_path):
     respx.get("https://integrate.api.nvidia.com/v1/models").mock(side_effect=httpx.ConnectError("down"))
-    report = await (await checker(tmp_path, handoff_enabled=False)).check()
+    report = await (await checker(tmp_path, handoff_enabled=False, llm_provider="nvidia")).check()
     assert report["ready"] is True and "unavailable" in report["checks"]["llm_models"]["detail"]
 
 

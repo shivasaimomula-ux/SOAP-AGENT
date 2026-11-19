@@ -4,6 +4,7 @@ Deviations from `HERBENZO_VOICE_AGENT_BUILD_SPEC.md` and choices made during the
 
 | Date | Decision | Reason |
 |---|---|---|
+| 2026-11-19 | Default provider is Gemini Live (`gemini-3.8-live` via `google-genai`). Text roles use a short Live session and the output transcript, because native-audio models only return audio. Browser voice is a server WebSocket that transcribes, runs the existing intake turn, and speaks that reply with `SPEAK:`. `GUARDRAILS_BACKEND=auto` uses local blocked-term and injection checks unless every role is nvidia, in which case NemoGuard stays. | Buildathon needs a Google key only. The intake graph, red flags, lint, read-back, and SymptomSpec gate stay. NVIDIA remains selectable with `LLM_PROVIDER=nvidia`. Not verified against a live key in CI. |
 | 2026-09-16 | Default LLM for all roles is `nvidia/nemotron-3.5-lightning-30b-a3b` | `meta/llama-3.3-70b-instruct` (blueprint default) was retired by NVIDIA on 2026-08-26 (HTTP 410). Lightning verified for tool calling with the project key. |
 | 2026-09-16 | Python 3.12 via `uv`; dependencies resolved to latest versions and pinned in `uv.lock` (not the blueprint's 2025 pins) | Blueprint pins (langgraph 0.6, langchain 0.3) are a year old; fresh build has no compatibility constraint with them. |
 | 2026-09-16 | `.env` lives at the repo root and is discovered by walking up from the package | One secrets file for agent and voice services. |

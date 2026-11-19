@@ -15,7 +15,7 @@ async def test_session_lock_map_evicts_idle_unlocked_entries():
     a = locks["a"]
     b = locks["b"]
     assert len(locks) == 2
-    assert a is locks["a"]
+    assert a is locks["a"] and b is locks["b"]
 
     time.sleep(0.06)
     # Touching a new key triggers TTL eviction of idle unlocked locks.

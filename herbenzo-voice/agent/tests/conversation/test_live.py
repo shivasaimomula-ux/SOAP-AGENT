@@ -45,8 +45,13 @@ ACIDITY_ANSWERS = {
 
 async def converse(answers: dict[str, str], interjections: dict[str, str] | None = None, max_turns: int = 30):
     settings = Settings()
-    if not settings.nvidia_api_key:
+    provider = settings.llm_extractor_provider
+    if provider in ("gemini_live", "google") and not settings.google_credentials_configured():
+        pytest.skip("GOOGLE_API_KEY or Vertex settings not configured")
+    elif provider == "nvidia" and not settings.nvidia_api_key:
         pytest.skip("NVIDIA_API_KEY not configured")
+    elif provider == "anthropic" and not settings.anthropic_api_key:
+        pytest.skip("ANTHROPIC_API_KEY not configured")
     deps = default_deps(settings, None)
     deps.spec_sink = InMemorySpecSink()
     deps.handoff = NoopHandoff()

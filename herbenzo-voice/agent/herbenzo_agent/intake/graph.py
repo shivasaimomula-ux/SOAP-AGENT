@@ -19,7 +19,7 @@ from langgraph.graph import END, START, StateGraph
 
 from herbenzo_agent.audit.reproducibility import build_provenance
 from herbenzo_agent.contracts.symptom_spec import RedFlag, SpecStatus, SymptomSpec
-from herbenzo_agent.guardrails.nemoguard import GuardStatus, Guardrails, NoopGuardrails
+from herbenzo_agent.guardrails.nemoguard import Guardrails, GuardStatus, NoopGuardrails
 from herbenzo_agent.handoff.worker import Handoff, NoopHandoff
 from herbenzo_agent.intake import scripts
 from herbenzo_agent.intake.extractor import Extractor

@@ -15,8 +15,8 @@ from typing import Protocol
 import httpx
 
 from herbenzo_agent.contracts.symptom_spec import SymptomSpec
-from herbenzo_agent.handoff.recommender_adapter import to_predict_request
 from herbenzo_agent.handoff.contract_gate import validate_predict_request
+from herbenzo_agent.handoff.recommender_adapter import to_predict_request
 from herbenzo_agent.persistence.store import SqliteStore
 
 logger = logging.getLogger(__name__)

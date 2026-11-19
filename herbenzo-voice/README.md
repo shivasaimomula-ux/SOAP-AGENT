@@ -1,8 +1,63 @@
 # Herbenzo Voice — Stage F intake agent
 
 Voice/chat intake that screens for emergencies, captures symptoms and safety history, reads them back, and emits a
-validated **`SymptomSpec`** to the Stage A Recommender. Built from the NVIDIA ambient-patient blueprint; full design in
-[`docs/BUILD_SPEC.md`](docs/BUILD_SPEC.md), deviations in [`DECISIONS.md`](DECISIONS.md).
+validated **`SymptomSpec`** to the Stage A Recommender. The default model and voice are **Gemini Live**
+(`LLM_PROVIDER=gemini_live`, model `gemini-3.8-live`). The intake graph, slots, red-flag escalation, blocked-term
+lint, read-back, and SymptomSpec gate are the same ones this agent already ran. NVIDIA Nemotron, NemoGuard, and Riva
+stay selectable. Full design in [`docs/BUILD_SPEC.md`](docs/BUILD_SPEC.md), deviations in [`DECISIONS.md`](DECISIONS.md).
+
+## Gemini Live (default)
+
+Native-audio Live models only return audio. Extractor, responder, and red-flag calls open a short Live session and
+read the output transcript, so their JSON and question contracts do not change. The browser page streams 16 kHz PCM
+to `GET /v1/voice/live` (WebSocket). The server transcribes with Live, runs one intake turn, then asks Live to speak
+that reply and nothing else (`SPEAK:`). Microphone audio the model answers on its own is not played.
+
+`GOOGLE_API_KEY` is read from the environment or a gitignored `.env` (see `.env.example`). Do not commit it.
+Vertex is the alternative: `GOOGLE_GENAI_USE_VERTEXAI=true`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`.
+
+```bash
+cd herbenzo-voice/agent
+# put GOOGLE_API_KEY in the repo-root .env, or export it
+uv sync
+uv run uvicorn herbenzo_agent.server.app:create_app --factory --host 0.0.0.0 --port 8081
+```
+
+Open `http://localhost:8081/ui/pilot` (Chrome), tap to talk, allow the microphone. `PIPELINE_MODE=false` is the
+intake-only demo when Stage A is not running. `ENV=dev` leaves `/v1/chat` and the voice socket open behind rate
+limits. Prod (`ENV=prod`) requires `CHAT_BOOTSTRAP_TOKEN` as the `token` query on the socket and `X-Chat-Token` on chat.
+
+Switch back to NVIDIA with `LLM_PROVIDER=nvidia` and `NVIDIA_API_KEY`. `GUARDRAILS_BACKEND=auto` then uses NemoGuard.
+`GUARDRAILS_BACKEND=nemo` forces that path on Gemini too. `deterministic` keeps the local blocked-term and
+injection checks and never calls NVIDIA. Red-flag rules still run first, so an emergency is escalated rather than refused.
+
+The Riva / ACE Controller service under `voice/` is unchanged and still needs NVIDIA speech endpoints. The pilot page
+does not use it.
+
+Live sessions are about 15 minutes. CI does not call a real key; unit tests mock the Live session.
+
+### Cloud Run
+
+The agent container is `herbenzo-voice/agent/Dockerfile` (port 8081, WebSocket on the same port). Cloud Run serves
+WebSockets over HTTPS. The image build still needs the `herbenzo-contracts` checkout the agent's `pyproject.toml`
+points at (that path is a local editable dependency, unchanged here).
+
+```bash
+gcloud run deploy soap-agent \
+  --source herbenzo-voice/agent \
+  --region asia-south1 \
+  --allow-unauthenticated \
+  --timeout=3600 \
+  --session-affinity \
+  --min-instances=1 \
+  --set-env-vars ENV=dev,LLM_PROVIDER=gemini_live,PIPELINE_MODE=false,GUARDRAILS_BACKEND=deterministic \
+  --set-secrets GOOGLE_API_KEY=GOOGLE_API_KEY:latest
+```
+
+For Vertex, drop the API-key secret and set `GOOGLE_GENAI_USE_VERTEXAI=true` plus `GOOGLE_CLOUD_PROJECT` and
+`GOOGLE_CLOUD_LOCATION`, and give the Cloud Run service account permission to call the Gemini API. SQLite on the
+instance disk is ephemeral. `ENV=prod` also needs the tokens and HTTPS CORS origins from `.env.example`. Open
+`https://<service>/ui/pilot`.
 
 ## Build status
 
@@ -14,7 +69,7 @@ validated **`SymptomSpec`** to the Stage A Recommender. Built from the NVIDIA am
 | M3 LLM nodes + LangGraph + chat API | ✅ |
 | M4 Guardrails (NemoGuard content safety, input + output) | ✅ |
 | M5 Audit store + handoff to Stage A Recommender | ✅ |
-| M6 Voice (ACE Controller / Riva, WebRTC UI, Docker/Caddy) | ✅ (browser mic test by Shiva pending; Docker files not yet run) |
+| M6 Voice (Gemini Live native audio on `/ui/pilot`; ACE Controller / Riva still optional) | ✅ (not exercised against a live Google key in CI; Docker files not yet run) |
 | M7 Hardening (redaction, retention, metrics, readiness, rate limits) | ✅ (Postgres deferred) |
 
 ## Layout

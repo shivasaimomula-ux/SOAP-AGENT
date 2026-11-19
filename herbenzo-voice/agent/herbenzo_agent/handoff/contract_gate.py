@@ -9,10 +9,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import ValidationError
-
 from herbenzo_contracts import SymptomSpec as SharedSymptomSpec
 from herbenzo_contracts import validation_error_body
+from pydantic import ValidationError
 
 
 def validate_outbound_symptom_spec(payload: dict[str, Any]) -> SharedSymptomSpec:

@@ -1,4 +1,10 @@
-# Ambient Healthcare Agents Developer Example
+# SOAP Agent
+
+SOAP Agent is a Gemini Live-powered Herbenzo voice intake agent. Someone speaks symptoms in the browser; the agent screens for emergencies, fills the same intake slots, reads them back, and emits a validated SymptomSpec. The model and the voice are Google's Gemini Live API (`gemini-3.8-live` through the `google-genai` SDK). Setup and run steps are in [`herbenzo-voice/README.md`](herbenzo-voice/README.md).
+
+This repository is a fork of NVIDIA's [Ambient Healthcare Agents](https://github.com/NVIDIA-AI-Blueprints/ambient-healthcare-agents) developer example (NeMo Microservices, Nemotron, Riva ASR/TTS, and LLM NIM). The original example is still in this tree, including the optional Riva voice controller. Its developer-example code is under the Apache License 2.0, Copyright 2020 NVIDIA Corporation (`LICENSE`). NVIDIA ACE Controller (`ace-controller`, used by the optional Riva path) is BSD 2-Clause. NIM containers, hosted models, and the NVIDIA API stay under the NVIDIA terms in the original licence section below. Herbenzo's own intake code is noted in [`herbenzo-voice/NOTICE`](herbenzo-voice/NOTICE).
+
+## Original NVIDIA Ambient Healthcare Agents example
 
 **Build advanced AI agents for providers and patients using this developer example powered by NeMo Microservices, NVIDIA Nemotron, Riva ASR and TTS, and NVIDIA LLM NIM**
 

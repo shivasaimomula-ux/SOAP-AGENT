@@ -3,15 +3,37 @@ import pytest
 from herbenzo_agent.settings import MissingConfigError, Settings
 
 
-def test_defaults_use_current_nvidia_model():
+def test_defaults_use_gemini_live():
     s = Settings(_env_file=None)
-    assert s.llm_extractor_model == "nvidia/nemotron-3.5-lightning-30b-a3b"
+    assert s.llm_provider == "gemini_live"
+    assert s.llm_extractor_provider == "gemini_live"
+    assert s.llm_extractor_model == "gemini-3.8-live"
+    assert s.llm_responder_model == "gemini-3.8-live"
+    assert s.llm_red_flag_model == "gemini-3.8-live"
+    assert s.resolved_guardrails_backend() == "deterministic"
+    assert s.responder_timeout_s == 15.0
     assert s.min_adult_age == 18
     assert s.pipeline_mode is True
     assert s.guardrails_fail_closed() is True
     assert s.recommender_url == "http://localhost:8000"
     assert s.requires_chat_auth() is False
     assert s.chat_bootstrap_token is None
+
+
+def test_llm_provider_nvidia_restores_nemotron():
+    s = Settings(_env_file=None, llm_provider="nvidia")
+    assert s.llm_extractor_provider == "nvidia"
+    assert s.llm_responder_provider == "nvidia"
+    assert s.llm_red_flag_provider == "nvidia"
+    assert s.llm_extractor_model == "nvidia/nemotron-3.5-lightning-30b-a3b"
+    assert s.resolved_guardrails_backend() == "nemo"
+
+
+def test_explicit_role_model_is_kept_when_provider_changes():
+    s = Settings(_env_file=None, llm_provider="nvidia", llm_extractor_model="custom/model")
+    assert s.llm_extractor_provider == "nvidia"
+    assert s.llm_extractor_model == "custom/model"
+    assert s.llm_responder_model == "nvidia/nemotron-3.5-lightning-30b-a3b"
 
 
 def test_guardrails_fail_closed_policy():

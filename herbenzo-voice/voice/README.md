@@ -1,5 +1,7 @@
 # Herbenzo voice controller
 
+Optional NVIDIA path. The default demo is Gemini Live on the agent itself: `http://localhost:8081/ui/pilot` (see `../README.md`). This directory is still the Riva / ACE Controller loop.
+
 Browser microphone ⇄ WebRTC ⇄ Silero VAD ⇄ Riva ASR (Parakeet) ⇄ **Herbenzo intake agent** ⇄ Riva TTS (Magpie) ⇄ browser speaker.
 Built on NVIDIA ACE Controller / Pipecat, adapted from the ambient-patient blueprint (see `pipeline_herbenzo.py` header for what changed).
 

@@ -54,9 +54,7 @@ class SessionLockMap:
 
     def _evict(self, now: float) -> None:
         stale = [
-            k
-            for k, (lock, ts) in self._entries.items()
-            if not lock.locked() and now - ts >= self.idle_ttl_s
+            k for k, (lock, ts) in self._entries.items() if not lock.locked() and now - ts >= self.idle_ttl_s
         ]
         for k in stale:
             del self._entries[k]

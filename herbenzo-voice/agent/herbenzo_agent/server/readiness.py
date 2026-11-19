@@ -58,24 +58,47 @@ class ReadinessChecker:
         return models
 
     async def _check_models(self) -> dict[str, Any]:
-        configured = {
+        roles = ("extractor", "responder", "red_flag")
+        nvidia = {
             role: getattr(self.settings, f"llm_{role}_model")
-            for role in ("extractor", "responder", "red_flag")
+            for role in roles
             if getattr(self.settings, f"llm_{role}_provider") == "nvidia"
         }
-        if not configured:
-            return {"ok": True, "detail": "no hosted NVIDIA models configured"}
-        try:
-            available = await self.available_models()
-        except (httpx.HTTPError, KeyError, ValueError) as exc:
-            # Can't prove they are gone; don't fail readiness on a transient provider problem.
-            return {"ok": True, "detail": f"model list unavailable ({type(exc).__name__})"}
-        missing = sorted({model for model in configured.values() if model not in available})
-        return {
-            "ok": not missing,
-            "missing": missing,
-            "detail": "retired or unknown model" if missing else "ok",
+        gemini = {
+            role: getattr(self.settings, f"llm_{role}_model")
+            for role in roles
+            if getattr(self.settings, f"llm_{role}_provider") in ("gemini_live", "google")
         }
+        if not nvidia and not gemini:
+            return {"ok": True, "detail": "no hosted models to verify"}
+        parts: list[str] = []
+        ok = True
+        missing: list[str] = []
+        if nvidia:
+            try:
+                available = await self.available_models()
+            except (httpx.HTTPError, KeyError, ValueError) as exc:
+                # Can't prove they are gone; don't fail readiness on a transient provider problem.
+                parts.append(f"model list unavailable ({type(exc).__name__})")
+            else:
+                missing = sorted({model for model in nvidia.values() if model not in available})
+                if missing:
+                    ok = False
+                    parts.append("retired or unknown model")
+                else:
+                    parts.append("nvidia ok")
+        if gemini:
+            if self.settings.google_credentials_configured():
+                parts.append("gemini live credentials present")
+            elif self.settings.env == "prod":
+                ok = False
+                parts.append("GOOGLE_API_KEY or Vertex settings required")
+            else:
+                parts.append("GOOGLE_API_KEY not set (dev)")
+        result: dict[str, Any] = {"ok": ok, "detail": "; ".join(parts)}
+        if missing:
+            result["missing"] = missing
+        return result
 
     async def _check_recommender(self) -> dict[str, Any]:
         url = self.settings.recommender_url.rstrip("/")

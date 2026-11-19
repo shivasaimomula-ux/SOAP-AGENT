@@ -180,7 +180,9 @@ class MapExtractor:
         return self.mapping.get(turn.text, ExtractionResult(intent=Intent.unclear))
 
 
-def service(guardrails, mapping, *, guardrails_fail_closed: bool = True) -> tuple[IntakeService, InMemorySpecSink]:
+def service(
+    guardrails, mapping, *, guardrails_fail_closed: bool = True
+) -> tuple[IntakeService, InMemorySpecSink]:
     sink = InMemorySpecSink()
     deps = IntakeDeps(
         extractor=MapExtractor(mapping),
@@ -242,7 +244,9 @@ async def test_unavailable_input_fails_closed_in_pipeline_mode():
         guard,
         {
             text: ExtractionResult(
-                updates=[SlotUpdate(slot_key="chief_complaint.summary", value="acidity", evidence_quote="acidity")]
+                updates=[
+                    SlotUpdate(slot_key="chief_complaint.summary", value="acidity", evidence_quote="acidity")
+                ]
             )
         },
         guardrails_fail_closed=True,

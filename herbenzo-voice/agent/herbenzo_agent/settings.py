@@ -10,13 +10,21 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-LLMProvider = Literal["nvidia", "anthropic", "google", "fake"]
+LLMProvider = Literal["nvidia", "anthropic", "google", "gemini_live", "fake"]
+GuardrailsBackend = Literal["auto", "nemo", "deterministic"]
 
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 DEFAULT_NVIDIA_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
+# Native-audio Gemini Live model (AI Studio and Vertex). Audio in, audio out.
+DEFAULT_GEMINI_LIVE_MODEL = "gemini-3.8-live"
+_ROLE_MODELS = {
+    "nvidia": DEFAULT_NVIDIA_MODEL,
+    "gemini_live": DEFAULT_GEMINI_LIVE_MODEL,
+    "google": DEFAULT_GEMINI_LIVE_MODEL,
+}
 
 
 def _find_env_file() -> Path | None:
@@ -37,25 +45,37 @@ class Settings(BaseSettings):
 
     env: Literal["dev", "test", "prod"] = "dev"
 
-    # Provider credentials
+    # Provider credentials. Secrets come from the environment or a gitignored .env, never from code.
     nvidia_api_key: str | None = None
     anthropic_api_key: str | None = None
     google_api_key: str | None = None
+    google_genai_use_vertexai: bool = False
+    google_cloud_project: str | None = None
+    google_cloud_location: str = "us-central1"
 
-    # LLM roles
-    llm_extractor_provider: LLMProvider = "nvidia"
-    llm_extractor_model: str = DEFAULT_NVIDIA_MODEL
+    # LLM_PROVIDER sets every role that does not set LLM_<ROLE>_PROVIDER itself.
+    llm_provider: LLMProvider = "gemini_live"
+    gemini_live_model: str = DEFAULT_GEMINI_LIVE_MODEL
+    gemini_live_voice: str = "Kore"
+    gemini_live_api_version: str = "v1beta"
+    gemini_live_listen_timeout_s: float = 20.0
+    gemini_live_speak_timeout_s: float = 30.0
+
+    # LLM roles. Defaults follow Gemini Live; LLM_PROVIDER=nvidia restores Nemotron.
+    llm_extractor_provider: LLMProvider = "gemini_live"
+    llm_extractor_model: str = DEFAULT_GEMINI_LIVE_MODEL
     llm_extractor_base_url: str | None = None
-    llm_responder_provider: LLMProvider = "nvidia"
-    llm_responder_model: str = DEFAULT_NVIDIA_MODEL
+    llm_responder_provider: LLMProvider = "gemini_live"
+    llm_responder_model: str = DEFAULT_GEMINI_LIVE_MODEL
     llm_responder_base_url: str | None = None
-    llm_red_flag_provider: LLMProvider = "nvidia"
-    llm_red_flag_model: str = DEFAULT_NVIDIA_MODEL
+    llm_red_flag_provider: LLMProvider = "gemini_live"
+    llm_red_flag_model: str = DEFAULT_GEMINI_LIVE_MODEL
     llm_red_flag_base_url: str | None = None
     llm_disable_thinking: bool = True
     llm_extractor_timeout_s: float = 20.0
 
-    # Guardrails
+    # Guardrails. auto: NemoGuard when every role is nvidia, otherwise the local checks.
+    guardrails_backend: GuardrailsBackend = "auto"
     guardrails_enabled: bool = True
     guardrails_config_path: str = "herbenzo_agent/guardrails/herbenzo-intake-nemoguard"
     guardrails_base_url: str = NVIDIA_BASE_URL
@@ -89,6 +109,42 @@ class Settings(BaseSettings):
     # When true (default), /ready requires Stage A at RECOMMENDER_URL. Set false for intake-only.
     # Also: unavailable NemoGuard input rails fail closed (block) when true; see guardrails_fail_closed().
     pipeline_mode: bool = True
+
+    @model_validator(mode="after")
+    def align_llm_roles(self):
+        """Apply LLM_PROVIDER, and pick the model that matches a provider when one was not set."""
+        shared = self.llm_provider if "llm_provider" in self.model_fields_set else None
+        for role in ("extractor", "responder", "red_flag"):
+            provider_field = f"llm_{role}_provider"
+            model_field = f"llm_{role}_model"
+            if shared and provider_field not in self.model_fields_set:
+                setattr(self, provider_field, shared)
+            provider = getattr(self, provider_field)
+            if model_field not in self.model_fields_set and provider in _ROLE_MODELS:
+                setattr(self, model_field, _ROLE_MODELS[provider])
+        providers = {self.llm_extractor_provider, self.llm_responder_provider, self.llm_red_flag_provider}
+        if providers & {"gemini_live", "google"}:
+            # A Live turn speaks audio and then returns a transcript, so the old NVIDIA budgets are tight.
+            if "responder_timeout_s" not in self.model_fields_set:
+                self.responder_timeout_s = 15.0
+            if "llm_extractor_timeout_s" not in self.model_fields_set:
+                self.llm_extractor_timeout_s = 30.0
+        return self
+
+    def google_credentials_configured(self) -> bool:
+        if self.google_genai_use_vertexai:
+            return bool(self.google_cloud_project)
+        return bool(self.google_api_key)
+
+    def resolved_guardrails_backend(self) -> str:
+        if not self.guardrails_enabled:
+            return "off"
+        if self.guardrails_backend != "auto":
+            return self.guardrails_backend
+        providers = {self.llm_extractor_provider, self.llm_responder_provider, self.llm_red_flag_provider}
+        if providers and providers <= {"nvidia"}:
+            return "nemo"
+        return "deterministic"
 
     def requires_chat_auth(self) -> bool:
         """Prod profile (ENV=prod) requires a bootstrap token on /v1/chat; localhost demo does not.
@@ -151,10 +207,25 @@ class Settings(BaseSettings):
         if self.env == "prod":
             if any(o == "*" or "localhost" in o or o.startswith("http://") for o in self.cors_allow_origins):
                 problems.append("CORS_ALLOW_ORIGINS must list only https production origins")
-            uses_nvidia = "nvidia" in {self.llm_extractor_provider, self.llm_responder_provider}
+            providers = {self.llm_extractor_provider, self.llm_responder_provider, self.llm_red_flag_provider}
             self_hosted = bool(self.llm_extractor_base_url and self.llm_responder_base_url)
-            if uses_nvidia and not self.nvidia_api_key and not self_hosted:
+            if "nvidia" in providers and not self.nvidia_api_key and not self_hosted:
                 problems.append("NVIDIA_API_KEY is required unless self-hosted base URLs are configured")
+            if providers & {"gemini_live", "google"} and not self.google_credentials_configured():
+                problems.append(
+                    "GOOGLE_API_KEY is required for gemini_live "
+                    "(or set GOOGLE_GENAI_USE_VERTEXAI with GOOGLE_CLOUD_PROJECT)"
+                )
+            if "anthropic" in providers and not self.anthropic_api_key:
+                problems.append("ANTHROPIC_API_KEY is required for the anthropic provider")
+            if (
+                self.resolved_guardrails_backend() == "nemo"
+                and not self.nvidia_api_key
+                and "integrate.api.nvidia.com" in self.guardrails_base_url
+            ):
+                problems.append(
+                    "NVIDIA_API_KEY is required for NemoGuard (or set GUARDRAILS_BACKEND=deterministic)"
+                )
             if not self.guardrails_enabled:
                 problems.append("GUARDRAILS_ENABLED must be true in production")
             if self.requires_chat_auth() and (

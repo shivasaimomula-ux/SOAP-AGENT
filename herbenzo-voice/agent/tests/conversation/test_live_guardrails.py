@@ -27,7 +27,7 @@ BLOCKED = [
 
 @pytest.fixture
 def rails():
-    settings = Settings(guardrails_timeout_s=10)
+    settings = Settings(guardrails_timeout_s=10, guardrails_backend="nemo", llm_provider="nvidia")
     if not settings.nvidia_api_key:
         pytest.skip("NVIDIA_API_KEY not configured")
     return build_guardrails(settings)

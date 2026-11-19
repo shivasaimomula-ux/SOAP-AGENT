@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from herbenzo_agent import __version__
 from herbenzo_agent.contracts.export_schema import build_schema
+from herbenzo_agent.guardrails.deterministic import DeterministicGuardrails
 from herbenzo_agent.guardrails.nemoguard import Guardrails, NemoGuardRails, NoopGuardrails
 from herbenzo_agent.handoff.worker import NoopHandoff, RecommenderHandoff
 from herbenzo_agent.intake.extractor import LLMExtractor
@@ -33,6 +34,7 @@ from herbenzo_agent.logging_setup import configure_logging
 from herbenzo_agent.observability import StageMetrics
 from herbenzo_agent.persistence.checkpointer import open_checkpointer
 from herbenzo_agent.persistence.store import SqliteStore
+from herbenzo_agent.server.live_routes import register_live_routes
 from herbenzo_agent.server.protection import (
     SessionLockMap,
     SlidingWindowLimiter,
@@ -57,6 +59,8 @@ AGENT_DIR = Path(__file__).resolve().parents[2]
 def build_guardrails(settings: Settings) -> Guardrails:
     if not settings.guardrails_enabled:
         return NoopGuardrails()
+    if settings.resolved_guardrails_backend() == "deterministic":
+        return DeterministicGuardrails()
     path = Path(settings.guardrails_config_path)
     if not path.is_absolute():
         path = AGENT_DIR / path
@@ -131,6 +135,7 @@ AGENT_STATIC = Path(__file__).resolve().parent / "static"
 def create_app(
     settings: Settings | None = None,
     deps_factory: Callable[[Settings, SqliteStore], IntakeDeps] | None = None,
+    gemini_opener: Callable | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
     deps_factory = deps_factory or default_deps
@@ -178,6 +183,7 @@ def create_app(
             yield
 
     app = FastAPI(title="Herbenzo Intake Agent", version=__version__, lifespan=lifespan)
+    app.state.gemini_opener = gemini_opener
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_allow_origins,
@@ -213,6 +219,7 @@ def create_app(
         return thread_id
 
     register_voice_routes(app, settings, locks, valid_thread, metrics)
+    register_live_routes(app, settings, locks, valid_thread, metrics, chat_limiter, new_session_limiter)
 
     @app.get("/ui/pilot")
     @app.get("/ui/pilot.html")
