@@ -9,7 +9,6 @@ dependencies = [
     "fastapi>=0.141.1",
     "google-genai>=3.6.0",
     "httpx>=0.28.1",
-    "herbenzo-contracts>=0.1.1",
     "langchain-core>=1.6.3",
     "langchain-nvidia-ai-endpoints>=1.4.3",
     "langgraph>=1.2.11",
@@ -20,11 +19,14 @@ dependencies = [
     "uvicorn[standard]>=0.53.0",
 ]
 
+[project.optional-dependencies]
+# Federated SymptomSpec. Private repo: `uv sync --extra contracts` needs GitHub access.
+# Without the extra, the outbound gate uses herbenzo_agent.contracts.symptom_spec.
+contracts = ["herbenzo-contracts>=0.1.1"]
+
 [tool.uv.sources]
-# Portable source for a fresh machine. The repo is private: uv sync needs GitHub access
-# (SSH, or a credential that can read shivasaimomula-ux/herbenzo-contracts).
-# Optional local checkout — replace the git line, do not commit an absolute path.
-# From this directory, a clone that sits next to the SOAP-AGENT repo is:
+# Do not commit a machine-specific absolute path.
+# Local checkout next to this repo, from herbenzo-voice/agent:
 #   herbenzo-contracts = { path = "../../../herbenzo-contracts", editable = true }
 herbenzo-contracts = { git = "https://github.com/shivasaimomula-ux/herbenzo-contracts.git", rev = "33205e758ef89986551a13b1e7aecbf97e5136ef" }
 

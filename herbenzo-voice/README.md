@@ -46,8 +46,9 @@ Live sessions are about 15 minutes. CI does not call a real key; unit tests mock
 ### Cloud Run
 
 The agent container is `herbenzo-voice/agent/Dockerfile` (port 8081, WebSocket on the same port). Cloud Run serves
-WebSockets over HTTPS. `herbenzo-contracts` is installed from GitHub during `uv sync` (see the agent's
-`pyproject.toml`). The repo is private, so the build needs a credential that can read
+WebSockets over HTTPS. `uv sync` does not clone `herbenzo-contracts` (that repo is private). The outbound gate then
+uses the in-repo SymptomSpec. `uv sync --extra contracts` installs the federated package from
+git rev `33205e758ef89986551a13b1e7aecbf97e5136ef` and needs a credential that can read
 `shivasaimomula-ux/herbenzo-contracts`. A local checkout can replace that git source; do not commit an absolute path.
 
 ```bash

@@ -9,9 +9,35 @@ from __future__ import annotations
 
 from typing import Any
 
-from herbenzo_contracts import SymptomSpec as SharedSymptomSpec
-from herbenzo_contracts import validation_error_body
 from pydantic import ValidationError
+
+
+def _local_validation_error_body(exc: BaseException, *, code: str = "contract_validation") -> dict[str, Any]:
+    if isinstance(exc, ValidationError):
+        return {
+            "error": code,
+            "message": "Payload failed herbenzo-contracts validation",
+            "details": exc.errors(),
+        }
+    return {
+        "error": code,
+        "message": str(exc) or "Payload failed herbenzo-contracts validation",
+    }
+
+
+def _load_shared():
+    """Prefer the federated package. CI and a fresh clone use the in-repo SymptomSpec."""
+    try:
+        from herbenzo_contracts import SymptomSpec as shared_spec
+        from herbenzo_contracts import validation_error_body as error_body
+    except ImportError:
+        from herbenzo_agent.contracts.symptom_spec import SymptomSpec as shared_spec
+
+        error_body = _local_validation_error_body
+    return shared_spec, error_body
+
+
+SharedSymptomSpec, validation_error_body = _load_shared()
 
 
 def validate_outbound_symptom_spec(payload: dict[str, Any]) -> SharedSymptomSpec:
