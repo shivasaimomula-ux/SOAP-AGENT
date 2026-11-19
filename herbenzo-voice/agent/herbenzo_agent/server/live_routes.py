@@ -84,7 +84,14 @@ def register_live_routes(
         service: IntakeService = websocket.app.state.service
         speech = {"asr": f"gemini-live:{model}", "tts": f"gemini-live:{model}"}
         try:
-            async with opener(model, voice_session_config(voice_name=settings.gemini_live_voice)) as session:
+            # One Live session for this socket. Text roles do not open another one.
+            async with opener(
+                model,
+                voice_session_config(
+                    voice_name=settings.gemini_live_voice,
+                    silence_duration_ms=settings.gemini_live_silence_ms,
+                ),
+            ) as session:
                 reader = LiveReader(session)
                 try:
                     await websocket.send_json(
@@ -215,6 +222,7 @@ async def _speak_turn(
         }
     )
     try:
+        # Each Live PCM chunk is sent as it arrives. The utterance is not buffered first.
         async for chunk in reader.speak(result.reply, settings.gemini_live_speak_timeout_s):
             await websocket.send_json(
                 {

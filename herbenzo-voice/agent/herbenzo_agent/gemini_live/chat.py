@@ -1,22 +1,22 @@
-"""One-shot Live sessions for the extractor, responder, and red-flag classifier.
+"""Text calls for the extractor, responder, and red-flag classifier.
 
-`gemini-3.8-live` is a native-audio model: the Live API returns audio, not a text
-modality. These roles still need text (JSON or one question), so each call opens a
-short session and reads `output_audio_transcription`. The intake graph, prompts,
-lint, and slot contract are unchanged.
+Those roles need JSON or one short question. They call ``generateContent`` on a fast
+Flash model with the same Google credentials as Live. They do not open a Live session:
+native-audio Live spends the turn generating speech, then a transcript, which is why a
+responder turn was 15–17 s. The voice socket keeps the only Live session.
 """
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, PrivateAttr
 
-from herbenzo_agent.gemini_live.client import make_session_opener, text_session_config
-from herbenzo_agent.gemini_live.parsing import merge_transcript, parse_live_message
+from herbenzo_agent.gemini_live.client import build_genai_client
 
 
 def _message_text(message: Any) -> str:
@@ -26,7 +26,26 @@ def _message_text(message: Any) -> str:
     return str(content)
 
 
-class GeminiLiveChatModel(BaseChatModel):
+def _response_text(response: Any) -> str:
+    """Answer text only. Thought parts are not spoken and are not JSON."""
+    direct = getattr(response, "text", None)
+    if isinstance(direct, str) and direct.strip():
+        return direct.strip()
+    chunks: list[str] = []
+    for candidate in getattr(response, "candidates", None) or []:
+        content = getattr(candidate, "content", None)
+        for part in getattr(content, "parts", None) or []:
+            if getattr(part, "thought", False):
+                continue
+            text = getattr(part, "text", None)
+            if text:
+                chunks.append(text)
+    return "".join(chunks).strip()
+
+
+class GeminiTextChatModel(BaseChatModel):
+    """``generateContent`` chat model. One shared client, no Live connect per call."""
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     model_name: str
@@ -35,53 +54,58 @@ class GeminiLiveChatModel(BaseChatModel):
     project: str | None = None
     location: str | None = None
     api_version: str = "v1beta"
-    voice_name: str = "Kore"
-    temperature: float = 0.0
     max_output_tokens: int = 256
-    session_opener: Any = Field(default=None, exclude=True, repr=False)
+    thinking_level: str = "low"
+    # Tests inject this. Production leaves it empty and calls generateContent.
+    completer: Any = Field(default=None, exclude=True, repr=False)
+
+    _client: Any = PrivateAttr(default=None)
 
     @property
     def _llm_type(self) -> str:
-        return "gemini-live"
+        return "gemini-text"
 
     @property
     def _identifying_params(self) -> dict[str, Any]:
-        return {"model_name": self.model_name, "temperature": self.temperature}
+        return {"model_name": self.model_name, "thinking_level": self.thinking_level}
 
-    def _opener(self):
-        if self.session_opener is not None:
-            return self.session_opener
-        return make_session_opener(
-            api_key=self.api_key,
-            vertexai=self.vertexai,
-            project=self.project,
-            location=self.location,
-            api_version=self.api_version,
-        )
+    def _request_config(self, system: str) -> dict[str, Any]:
+        # Gemini 3 Flash rejects temperature / top_p / top_k. thinking_level is the latency knob.
+        config: dict[str, Any] = {
+            "system_instruction": system or "Follow the user message exactly.",
+            "max_output_tokens": self.max_output_tokens,
+        }
+        if self.thinking_level:
+            config["thinking_config"] = {"thinking_level": self.thinking_level}
+        return config
+
+    def _ensure_client(self):
+        if self._client is None:
+            self._client = build_genai_client(
+                api_key=self.api_key,
+                vertexai=self.vertexai,
+                project=self.project,
+                location=self.location,
+                api_version=self.api_version,
+            )
+        return self._client
 
     async def _complete(self, system: str, user_text: str) -> str:
-        config = text_session_config(
-            system=system or "Follow the user message exactly.",
-            temperature=self.temperature,
-            max_output_tokens=self.max_output_tokens,
-            voice_name=self.voice_name,
+        config = self._request_config(system)
+        if self.completer is not None:
+            result = self.completer(system, user_text, config)
+            if asyncio.iscoroutine(result):
+                result = await result
+            return str(result or "").strip()
+        response = await self._ensure_client().aio.models.generate_content(
+            model=self.model_name,
+            contents=user_text or " ",
+            config=config,
         )
-        parts: list[str] = []
-        async with self._opener()(self.model_name, config) as session:
-            await session.send_client_content(
-                turns={"role": "user", "parts": [{"text": user_text}]},
-                turn_complete=True,
-            )
-            async for message in session.receive():
-                event = parse_live_message(message)
-                if event.output_transcript:
-                    parts.append(event.output_transcript)
-                if event.turn_complete:
-                    break
-        return merge_transcript(parts)
+        return _response_text(response)
 
     def _generate(self, messages, stop=None, run_manager=None, **kwargs):
-        raise RuntimeError("GeminiLiveChatModel only supports ainvoke")
+        raise RuntimeError("GeminiTextChatModel only supports ainvoke")
 
     async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs) -> ChatResult:
         system_parts: list[str] = []

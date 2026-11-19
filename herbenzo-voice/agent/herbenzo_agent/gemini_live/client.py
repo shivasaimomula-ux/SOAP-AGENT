@@ -75,27 +75,23 @@ def make_session_opener(
     return opener
 
 
-def text_session_config(
-    *, system: str, temperature: float, max_output_tokens: int, voice_name: str
-) -> dict[str, Any]:
-    """Native-audio Live models only return AUDIO. Text roles read the output transcript."""
-    return {
-        "response_modalities": ["AUDIO"],
-        "temperature": temperature,
-        "max_output_tokens": max_output_tokens,
-        "system_instruction": system,
-        "output_audio_transcription": {},
-        "speech_config": {"voice_config": {"prebuilt_voice_config": {"voice_name": voice_name}}},
-    }
+def voice_session_config(*, voice_name: str, silence_duration_ms: int = 500) -> dict[str, Any]:
+    """One Live session for the whole call: 16 kHz PCM in, 24 kHz PCM out.
 
-
-def voice_session_config(*, voice_name: str) -> dict[str, Any]:
-    """Browser audio in, spoken replies out. Turn boundaries are client-signalled (manual VAD)."""
+    Automatic activity detection stays on. A finished clip also sends ``audio_stream_end``
+    so the server finalises the turn without waiting out a silence that never arrives.
+    """
     return {
         "response_modalities": ["AUDIO"],
         "system_instruction": VOICE_SYSTEM,
         "speech_config": {"voice_config": {"prebuilt_voice_config": {"voice_name": voice_name}}},
         "input_audio_transcription": {"custom_vocabulary": list(INPUT_VOCABULARY)},
         "output_audio_transcription": {},
-        "realtime_input_config": {"automatic_activity_detection": {"disabled": True}},
+        "realtime_input_config": {
+            "automatic_activity_detection": {
+                "disabled": False,
+                "prefix_padding_ms": 20,
+                "silence_duration_ms": silence_duration_ms,
+            }
+        },
     }

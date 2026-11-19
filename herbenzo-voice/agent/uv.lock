@@ -395,7 +395,7 @@ requires-dist = [
     { name = "bleach", specifier = ">=6.4.0" },
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "google-genai", specifier = ">=3.6.0" },
-    { name = "herbenzo-contracts", editable = "/Users/shivasaimomula/Desktop/herbenzo-contracts" },
+    { name = "herbenzo-contracts", git = "https://github.com/shivasaimomula-ux/herbenzo-contracts.git?rev=33205e758ef89986551a13b1e7aecbf97e5136ef" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "langchain-core", specifier = ">=1.6.3" },
     { name = "langchain-nvidia-ai-endpoints", specifier = ">=1.4.3" },
@@ -417,8 +417,8 @@ dev = [
 
 [[package]]
 name = "herbenzo-contracts"
-version = "0.1.2"
-source = { editable = "/Users/shivasaimomula/Desktop/herbenzo-contracts" }
+version = "0.1.5"
+source = { git = "https://github.com/shivasaimomula-ux/herbenzo-contracts.git?rev=33205e758ef89986551a13b1e7aecbf97e5136ef#33205e758ef89986551a13b1e7aecbf97e5136ef" }
 dependencies = [
     { name = "pydantic" },
 ]

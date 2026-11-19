@@ -21,7 +21,12 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-herbenzo-contracts = { path = "/Users/shivasaimomula/Desktop/herbenzo-contracts", editable = true }
+# Portable source for a fresh machine. The repo is private: uv sync needs GitHub access
+# (SSH, or a credential that can read shivasaimomula-ux/herbenzo-contracts).
+# Optional local checkout — replace the git line, do not commit an absolute path.
+# From this directory, a clone that sits next to the SOAP-AGENT repo is:
+#   herbenzo-contracts = { path = "../../../herbenzo-contracts", editable = true }
+herbenzo-contracts = { git = "https://github.com/shivasaimomula-ux/herbenzo-contracts.git", rev = "33205e758ef89986551a13b1e7aecbf97e5136ef" }
 
 [dependency-groups]
 dev = [

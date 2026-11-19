@@ -174,20 +174,22 @@ def build_intake_graph(deps: IntakeDeps, checkpointer: Any = None):
         return "screen" if state.get("turn_id") else "render"
 
     async def screen(state: TurnState) -> TurnState:
+        """Rule layer only. A hit skips the model and the extractor so escalation stays immediate."""
         session = IntakeSession.model_validate(state["session"])
         turn = next(t for t in session.turns if t.turn_id == state["turn_id"])
         with timed("red_flag_rules"):
             flags = screen_text(turn.text, turn.turn_id)
-        if not flags and needs_model_check(turn.text):
-            codes = await timed_await("red_flag_model", deps.red_flag_classifier.classify(turn.text))
-            flags = merge_model_codes(flags, codes, turn.text, turn.turn_id)
         return {"red_flags": [f.model_dump() for f in flags]}
 
     def after_screen(state: TurnState) -> str:
         return "plan" if state.get("red_flags") else "extract"
 
     async def extract(state: TurnState) -> TurnState:
-        """Input safety rail and extraction run concurrently; a blocked message discards the extraction."""
+        """Guardrail, extractor, and (when the rules were clear) the red-flag model run together.
+
+        A blocked message discards the extraction. Model red flags are still returned so an
+        emergency the rules missed escalates instead of being deflected.
+        """
         session = IntakeSession.model_validate(state["session"])
         turn = next(t for t in session.turns if t.turn_id == state["turn_id"])
         if session.phase in CONFIRMATION_PHASES and (intent := quick_confirmation(turn.text)):
@@ -195,11 +197,19 @@ def build_intake_graph(deps: IntakeDeps, checkpointer: Any = None):
                 "extraction": ExtractionResult(intent=intent).model_dump(mode="json"),
                 "input_blocked": False,
             }
+        model_check = needs_model_check(turn.text)
         with timed("understand"):
-            guard, extraction = await asyncio.gather(
+            tasks = [
                 timed_await("guardrail_input", deps.guardrails.check_input(turn.text)),
                 timed_await("extractor", deps.extractor.extract(session, turn)),
-            )
+            ]
+            if model_check:
+                tasks.append(timed_await("red_flag_model", deps.red_flag_classifier.classify(turn.text)))
+            results = await asyncio.gather(*tasks)
+        guard, extraction = results[0], results[1]
+        codes = results[2] if model_check else []
+        flags = merge_model_codes([], codes, turn.text, turn.turn_id) if codes else []
+        flag_payload = [f.model_dump() for f in flags]
         count(f"guardrail_input.{guard.status.value}")
         unavailable = guard.status is GuardStatus.unavailable
         fail_closed = unavailable and deps.guardrails_fail_closed
@@ -211,13 +221,17 @@ def build_intake_graph(deps: IntakeDeps, checkpointer: Any = None):
                 )
             else:
                 logger.info("input blocked by %s", guard.rail)
-            return {"extraction": {}, "input_blocked": True}
+            return {"extraction": {}, "input_blocked": True, "red_flags": flag_payload}
         if unavailable:
             logger.warning(
                 "input guardrail unavailable (%s); allowing message (intake-only fail-open)",
                 guard.rail,
             )
-        return {"extraction": extraction.model_dump(mode="json"), "input_blocked": False}
+        return {
+            "extraction": extraction.model_dump(mode="json"),
+            "input_blocked": False,
+            "red_flags": flag_payload,
+        }
 
     async def plan(state: TurnState) -> TurnState:
         session = IntakeSession.model_validate(state["session"])

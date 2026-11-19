@@ -1,17 +1,24 @@
 # Herbenzo Voice — Stage F intake agent
 
 Voice/chat intake that screens for emergencies, captures symptoms and safety history, reads them back, and emits a
-validated **`SymptomSpec`** to the Stage A Recommender. The default model and voice are **Gemini Live**
-(`LLM_PROVIDER=gemini_live`, model `gemini-3.8-live`). The intake graph, slots, red-flag escalation, blocked-term
-lint, read-back, and SymptomSpec gate are the same ones this agent already ran. NVIDIA Nemotron, NemoGuard, and Riva
-stay selectable. Full design in [`docs/BUILD_SPEC.md`](docs/BUILD_SPEC.md), deviations in [`DECISIONS.md`](DECISIONS.md).
+validated **`SymptomSpec`** to the Stage A Recommender. Voice is **Gemini Live**
+(`LLM_PROVIDER=gemini_live`, model `gemini-3.8-live`). Extractor, responder, and red-flag calls use a fast
+Flash model (`GEMINI_TEXT_MODEL`, default `gemini-3.8-flash`) over `generateContent`. The intake graph, slots,
+red-flag escalation, blocked-term lint, read-back, and SymptomSpec gate are unchanged. NVIDIA Nemotron, NemoGuard,
+and Riva stay selectable. Full design in [`docs/BUILD_SPEC.md`](docs/BUILD_SPEC.md), deviations in [`DECISIONS.md`](DECISIONS.md).
 
 ## Gemini Live (default)
 
-Native-audio Live models only return audio. Extractor, responder, and red-flag calls open a short Live session and
-read the output transcript, so their JSON and question contracts do not change. The browser page streams 16 kHz PCM
-to `GET /v1/voice/live` (WebSocket). The server transcribes with Live, runs one intake turn, then asks Live to speak
-that reply and nothing else (`SPEAK:`). Microphone audio the model answers on its own is not played.
+One Live session stays open for each browser voice connection. It transcribes 16 kHz PCM and speaks the graph's
+reply. It is not used for extraction or phrasing. Those roles call `generateContent` on `GEMINI_TEXT_MODEL`
+(override a single role with `LLM_EXTRACTOR_MODEL`, `LLM_RESPONDER_MODEL`, or `LLM_RED_FLAG_MODEL`). The same
+`GOOGLE_API_KEY` (or Vertex settings) is used. `RESPONDER_TIMEOUT_S` (default 6) is the phrase timeout; on expiry
+the slot's scripted question is used.
+
+The browser page streams 16 kHz PCM to `GET /v1/voice/live` (WebSocket). The server sends
+`audio/pcm;rate=16000` and `audio_stream_end` when the clip finishes, with automatic activity detection left on.
+It runs one intake turn, then asks Live to speak that reply and nothing else (`SPEAK:`). Output PCM is forwarded
+as each chunk arrives. Microphone audio the model answers on its own is not played.
 
 `GOOGLE_API_KEY` is read from the environment or a gitignored `.env` (see `.env.example`). Do not commit it.
 Vertex is the alternative: `GOOGLE_GENAI_USE_VERTEXAI=true`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`.
@@ -39,8 +46,9 @@ Live sessions are about 15 minutes. CI does not call a real key; unit tests mock
 ### Cloud Run
 
 The agent container is `herbenzo-voice/agent/Dockerfile` (port 8081, WebSocket on the same port). Cloud Run serves
-WebSockets over HTTPS. The image build still needs the `herbenzo-contracts` checkout the agent's `pyproject.toml`
-points at (that path is a local editable dependency, unchanged here).
+WebSockets over HTTPS. `herbenzo-contracts` is installed from GitHub during `uv sync` (see the agent's
+`pyproject.toml`). The repo is private, so the build needs a credential that can read
+`shivasaimomula-ux/herbenzo-contracts`. A local checkout can replace that git source; do not commit an absolute path.
 
 ```bash
 gcloud run deploy soap-agent \
@@ -98,6 +106,17 @@ uv run pytest -q
 uv run ruff check . && uv run ruff format --check .
 uv run python -m herbenzo_agent.contracts.export_schema   # after any contract change
 ```
+
+Latency against a server that already has `GOOGLE_API_KEY` (this script does not call Google itself):
+
+```bash
+cd herbenzo-voice/agent
+uv run python scripts/bench_latency.py --base-url http://127.0.0.1:8081
+uv run python scripts/bench_latency.py --pcm /path/to/speech.wav
+```
+
+`--pcm` is 16 kHz, 16-bit, mono WAV or raw PCM. Without it the voice turn sends a short silence clip, so the
+transcript may be empty; the timers still print.
 
 ## Try the chat intake
 
